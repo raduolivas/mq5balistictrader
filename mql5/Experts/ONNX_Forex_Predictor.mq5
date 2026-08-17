@@ -15,16 +15,18 @@
 
 //--- Inputs
 input group "=== Model & Execution Parameters ==="
-input string   InpSymbol            = "EURUSD";   // Trading Symbol
+input string   InpSymbol            = "";         // Trading Symbol (Blank = Current Chart Symbol)
 input double   InpRiskPercent       = 1.0;        // Max Risk per Trade (% Balance)
 input double   InpProbThreshold     = 0.65;       // Model Confidence Threshold (0.50-0.90)
 input double   InpAtrStopMultiplier = 1.5;        // ATR Stop Loss Multiplier
 input double   InpAtrTakeMultiplier = 2.5;        // ATR Take Profit Multiplier
-input double   InpMaxSpreadPips     = 1.2;        // Max Spread Filter (Pips)
+input double   InpMaxSpreadPips     = 1.5;        // Max Spread Filter (Pips)
+input double   InpMaxLotCap         = 1.0;        // Max Allowed Lot Cap (Safety Margin Guard)
 input int      InpMagicNumber       = 778899;     // EA Magic Number
 
 //--- Handles & Globals
 CTrade         ExtTrade;
+string         ExtSymbol            = "";
 long           ExtOnnxHandle        = INVALID_HANDLE;
 int            ExtAtrHandle         = INVALID_HANDLE;
 int            ExtVwapHandle        = INVALID_HANDLE;
@@ -40,17 +42,21 @@ const long     ExtShapeOut[]        = {1, 3};     // [Batch, 3 Classes: Short, N
 //+------------------------------------------------------------------+
 int OnInit()
 {
+   // Determine active symbol (if InpSymbol is blank, use attached chart symbol)
+   ExtSymbol = (InpSymbol == "" || InpSymbol == "EURUSD" && _Symbol != "EURUSD") ? _Symbol : InpSymbol;
+   
    ExtTrade.SetExpertMagicNumber(InpMagicNumber);
+   ExtTrade.SetDeviationInPoints(20);
    ExtTrade.SetMarginMode();
-   ExtTrade.SetTypeFillingBySymbol(InpSymbol);
+   ExtTrade.SetTypeFillingBySymbol(ExtSymbol);
    
    ExtDailyStartEquity = AccountInfoDouble(ACCOUNT_EQUITY);
    
    // Initialize ATR Indicator
-   ExtAtrHandle = iATR(InpSymbol, PERIOD_M5, 14);
+   ExtAtrHandle = iATR(ExtSymbol, PERIOD_M5, 14);
    if(ExtAtrHandle == INVALID_HANDLE)
    {
-      Print("[ERROR] Failed to create ATR handle.");
+      PrintFormat("[ERROR] Failed to create ATR handle for %s.", ExtSymbol);
       return(INIT_FAILED);
    }
 
@@ -75,7 +81,7 @@ int OnInit()
       return(INIT_FAILED);
    }
 
-   Print("[INIT] ONNX_Forex_Predictor initialized successfully. In-Process Latency < 0.5ms.");
+   PrintFormat("[INIT] ONNX_Forex_Predictor initialized for %s (Magic: %d). In-Process Latency < 0.5ms.", ExtSymbol, InpMagicNumber);
    return(INIT_SUCCEEDED);
 }
 
@@ -116,7 +122,7 @@ bool PassesRiskGuards(double spreadPips)
    {
       for(int i = PositionsTotal() - 1; i >= 0; i--)
       {
-         if(PositionGetSymbol(i) == InpSymbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
+         if(PositionGetSymbol(i) == ExtSymbol && PositionGetInteger(POSITION_MAGIC) == InpMagicNumber)
             return false;
       }
    }
@@ -131,18 +137,31 @@ double CalculateLotSize(double slPips)
 {
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double riskAmount = balance * (InpRiskPercent / 100.0);
-   double tickValue = SymbolInfoDouble(InpSymbol, SYMBOL_TRADE_TICK_VALUE);
-   double point = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
+   double tickValue = SymbolInfoDouble(ExtSymbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize  = SymbolInfoDouble(ExtSymbol, SYMBOL_TRADE_TICK_SIZE);
+   double point     = SymbolInfoDouble(ExtSymbol, SYMBOL_POINT);
+   if(tickSize <= 0) tickSize = point;
    
-   if(slPips <= 0 || tickValue <= 0) return 0.01;
+   int digits = (int)SymbolInfoInteger(ExtSymbol, SYMBOL_DIGITS);
+   double pipUnit = (digits == 3 || digits == 5 ? 10.0 * point : point);
+   double slDistance = slPips * pipUnit;
    
-   double lots = riskAmount / (slPips * 10.0 * tickValue);
-   double step = SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_STEP);
-   double minLot = SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_MIN);
-   double maxLot = SymbolInfoDouble(InpSymbol, SYMBOL_VOLUME_MAX);
+   double pointLossPerLot = (slDistance / tickSize) * tickValue;
+   if(pointLossPerLot <= 0) return SymbolInfoDouble(ExtSymbol, SYMBOL_VOLUME_MIN);
    
-   lots = MathFloor(lots / step) * step;
-   return MathMax(minLot, MathMin(maxLot, lots));
+   double calculatedLots = riskAmount / pointLossPerLot;
+   
+   // Check broker constraints and safety cap
+   double step   = SymbolInfoDouble(ExtSymbol, SYMBOL_VOLUME_STEP);
+   double minLot = SymbolInfoDouble(ExtSymbol, SYMBOL_VOLUME_MIN);
+   double maxLot = SymbolInfoDouble(ExtSymbol, SYMBOL_VOLUME_MAX);
+   
+   if(InpMaxLotCap > 0 && InpMaxLotCap < maxLot)
+      maxLot = InpMaxLotCap;
+      
+   double lots = MathFloor(calculatedLots / step) * step;
+   lots = MathMax(minLot, MathMin(maxLot, lots));
+   return NormalizeDouble(lots, 2);
 }
 
 //+------------------------------------------------------------------+
@@ -151,10 +170,10 @@ double CalculateLotSize(double slPips)
 void OnTick()
 {
    MqlTick tick;
-   if(!SymbolInfoTick(InpSymbol, tick)) return;
+   if(!SymbolInfoTick(ExtSymbol, tick)) return;
 
-   double point = SymbolInfoDouble(InpSymbol, SYMBOL_POINT);
-   int digits = (int)SymbolInfoInteger(InpSymbol, SYMBOL_DIGITS);
+   double point = SymbolInfoDouble(ExtSymbol, SYMBOL_POINT);
+   int digits = (int)SymbolInfoInteger(ExtSymbol, SYMBOL_DIGITS);
    double spreadPips = (tick.ask - tick.bid) / (digits == 3 || digits == 5 ? 10 * point : point);
 
    if(!PassesRiskGuards(spreadPips)) return;
@@ -203,15 +222,31 @@ void OnTick()
    {
       double sl = NormalizeDouble(tick.ask - slDistance, digits);
       double tp = NormalizeDouble(tick.ask + tpDistance, digits);
-      ExtTrade.Buy(lots, InpSymbol, tick.ask, sl, tp, "AI_ONNX_BUY");
-      PrintFormat("[AI TRADE] BUY %.2f lots at %.5f (Prob: %.2f%%)", lots, tick.ask, pLong * 100);
+      if(ExtTrade.Buy(lots, ExtSymbol, tick.ask, sl, tp, "AI_ONNX_BUY"))
+      {
+         PrintFormat("[AI TRADE] BUY %.2f lots %s at %.5f (Prob: %.2f%%) [Ticket: %I64u]", 
+                     lots, ExtSymbol, tick.ask, pLong * 100, ExtTrade.ResultOrder());
+      }
+      else
+      {
+         PrintFormat("[TRADE ERROR] Buy failed for %s. Retcode: %u (%s)", 
+                     ExtSymbol, ExtTrade.ResultRetcode(), ExtTrade.ResultRetcodeDescription());
+      }
    }
    // Short Signal
    else if(pShort >= InpProbThreshold && pShort > pLong)
    {
       double sl = NormalizeDouble(tick.bid + slDistance, digits);
       double tp = NormalizeDouble(tick.bid - tpDistance, digits);
-      ExtTrade.Sell(lots, InpSymbol, tick.bid, sl, tp, "AI_ONNX_SELL");
-      PrintFormat("[AI TRADE] SELL %.2f lots at %.5f (Prob: %.2f%%)", lots, tick.bid, pShort * 100);
+      if(ExtTrade.Sell(lots, ExtSymbol, tick.bid, sl, tp, "AI_ONNX_SELL"))
+      {
+         PrintFormat("[AI TRADE] SELL %.2f lots %s at %.5f (Prob: %.2f%%) [Ticket: %I64u]", 
+                     lots, ExtSymbol, tick.bid, pShort * 100, ExtTrade.ResultOrder());
+      }
+      else
+      {
+         PrintFormat("[TRADE ERROR] Sell failed for %s. Retcode: %u (%s)", 
+                     ExtSymbol, ExtTrade.ResultRetcode(), ExtTrade.ResultRetcodeDescription());
+      }
    }
 }
