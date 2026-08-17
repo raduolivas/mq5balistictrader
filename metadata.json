@@ -1,0 +1,6 @@
+{
+  "name": "MetaTrader 5 Forex AI Trading Studio",
+  "description": "High-performance algorithmic trading platform for MetaTrader 5 featuring in-process ONNX neural models and ZeroMQ Python AI engine.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

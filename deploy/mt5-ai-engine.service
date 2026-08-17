@@ -1,0 +1,15 @@
+[Unit]
+Description=MetaTrader 5 Python AI Strategy Engine
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/mq5balistictrader/python
+ExecStart=/home/ubuntu/mt5_ai_env/bin/python forex_ai_engine.py
+Restart=always
+RestartSec=3
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target

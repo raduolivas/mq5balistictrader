@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  ai-strategy-engine:
+    build:
+      context: ../python
+      dockerfile: Dockerfile
+    container_name: mt5_ai_strategy_engine
+    restart: always
+    network_mode: "host"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ZMQ_PUB_PORT=5556
+      - ZMQ_SUB_PORT=5555
+    volumes:
+      - ../python:/app
+      - ../models:/models
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
