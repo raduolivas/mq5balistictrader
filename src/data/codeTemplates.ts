@@ -181,17 +181,25 @@ void OnTick()
    double atrPips = currentAtr / (digits == 3 || digits == 5 ? 10 * point : point);
 
    // Extract Real-time ML Features
+   // Features: [OFI / Tick Bias, Spread Norm, ATR Expansion, Mid Deviation, Session Phase]
+   double midPrice = (tick.bid + tick.ask) * 0.5;
+   double tickBias = 0.0;
+   if(tick.flags & TICK_FLAG_ASK)
+      tickBias = 1.0;
+   else if(tick.flags & TICK_FLAG_BID)
+      tickBias = -1.0;
+
    float inputFeatures[5];
-   inputFeatures[0] = (float)((tick.ask_volume - tick.bid_volume) / (tick.ask_volume + tick.bid_volume + 1e-6)); // OFI
-   inputFeatures[1] = (float)(spreadPips / InpMaxSpreadPips);                                                       // Spread Norm
+   inputFeatures[0] = (float)tickBias;                                                                             // Tick Direction / OFI
+   inputFeatures[1] = (float)MathMin(2.0, spreadPips / InpMaxSpreadPips);                                         // Spread Norm
    inputFeatures[2] = (float)(atrValues[0] / (atrValues[2] + 1e-6));                                              // ATR Expansion
-   inputFeatures[3] = (float)((tick.last - (tick.bid + tick.ask) * 0.5) / (point * 10.0 + 1e-6));                // Mid Dev
-   inputFeatures[4] = (float)(MathSin(tick.time % 86400));                                                         // Session Phase
+   inputFeatures[3] = (float)((tick.ask - midPrice) / (point * 10.0 + 1e-6));                                     // Mid Dev
+   inputFeatures[4] = (float)(MathSin((double)(tick.time % 86400) / 86400.0 * 2.0 * 3.14159265));                // Session Phase
 
    float outputProbs[3]; // [P(Short), P(Neutral), P(Long)]
 
-   // Execute In-Process ONNX Inference (< 0.5ms)
-   if(!OnnxRun(ExtOnnxHandle, ONNX_NO_TRANSFORM, inputFeatures, outputProbs))
+   // Execute In-Process ONNX Inference (< 0.5ms) using ONNX_DEFAULT (0)
+   if(!OnnxRun(ExtOnnxHandle, ONNX_DEFAULT, inputFeatures, outputProbs))
    {
       PrintFormat("[ERROR] OnnxRun failed: %d", GetLastError());
       return;
