@@ -1,22 +1,73 @@
-version: '3.8'
+name: mt5-ai-runtime
+
+x-runtime-security: &runtime-security
+  build:
+    context: ..
+    dockerfile: python/Dockerfile
+  image: mt5-ai-runtime:local
+  restart: unless-stopped
+  init: true
+  read_only: true
+  user: "10001:10001"
+  pids_limit: 64
+  mem_limit: 256m
+  tmpfs:
+    - /tmp:size=16m,noexec,nosuid,nodev,mode=1777
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  stop_grace_period: 15s
+  logging:
+    driver: json-file
+    options:
+      max-size: 20m
+      max-file: "3"
 
 services:
-  ai-strategy-engine:
-    build:
-      context: ../python
-      dockerfile: Dockerfile
-    container_name: mt5_ai_strategy_engine
-    restart: always
-    network_mode: "host"
+  mt5-bridge:
+    <<: *runtime-security
+    container_name: mt5_tcp_zeromq_bridge
+    command: ["python", "mt5_tcp_bridge.py"]
     environment:
-      - PYTHONUNBUFFERED=1
-      - ZMQ_PUB_PORT=5556
-      - ZMQ_SUB_PORT=5555
-    volumes:
-      - ../python:/app
-      - ../models:/models
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+      PYTHONUNBUFFERED: "1"
+      BRIDGE_TCP_HOST: "0.0.0.0"
+      BRIDGE_HEALTH_HOST: "127.0.0.1"
+      BRIDGE_TCP_PORT: "5555"
+      BRIDGE_TICK_PUB_ENDPOINT: "tcp://0.0.0.0:5557"
+      BRIDGE_SIGNAL_PULL_ENDPOINT: "tcp://0.0.0.0:5556"
+      BRIDGE_ALLOWED_SYMBOLS: "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD"
+      BRIDGE_RCVHWM: "100"
+      BRIDGE_SNDHWM: "1000"
+    ports:
+      - "127.0.0.1:5555:5555"
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "bridge"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+
+  ai-strategy-engine:
+    <<: *runtime-security
+    container_name: mt5_ai_strategy_engine
+    command: ["python", "forex_ai_engine.py"]
+    depends_on:
+      mt5-bridge:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "1"
+      FOREX_SUB_ENDPOINT: "tcp://mt5-bridge:5557"
+      FOREX_SIGNAL_ENDPOINT: "tcp://mt5-bridge:5556"
+      FOREX_ALLOWED_SYMBOLS: "EURUSD,GBPUSD,USDJPY,AUDUSD,USDCAD"
+      FOREX_HEARTBEAT_PATH: "/tmp/engine-heartbeat"
+      FOREX_HEARTBEAT_INTERVAL_SECONDS: "1"
+      FOREX_HEALTH_MAX_AGE_SECONDS: "5"
+      FOREX_MINIMUM_TICKS: "50"
+      FOREX_CONFIDENCE_THRESHOLD: "0.68"
+    healthcheck:
+      test: ["CMD", "python", "healthcheck.py", "engine"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s

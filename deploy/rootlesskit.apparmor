@@ -1,0 +1,10 @@
+# AppArmor exception scoped to the RootlessKit binary installed for this host.
+# Install as /etc/apparmor.d/home.cybersecrad.bin.rootlesskit.
+abi <abi/4.0>,
+include <tunables/global>
+
+/home/cybersecrad/bin/rootlesskit flags=(unconfined) {
+  userns,
+
+  include if exists <local/home.cybersecrad.bin.rootlesskit>
+}

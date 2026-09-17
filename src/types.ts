@@ -42,24 +42,54 @@ export interface BacktestSummary {
   profitFactor: number;
   maxDrawdownPct: number;
   sharpeRatio: number;
-  avgLatencyMs: number;
 }
 
 export interface EquityPoint {
   step: number;
+  time?: string;
   equity: number;
+  balance?: number;
   drawdown: number;
+  price?: number;
 }
 
 export interface TradeRecord {
   id: number;
   time: string;
   type: 'BUY' | 'SELL';
+  pair?: ForexPair;
   price: number;
   lots: number;
   pips: number;
   profit: number;
   outcome: 'WIN' | 'LOSS';
+}
+
+export interface SimulationInput {
+  pair: ForexPair;
+  timeframe: 'M1' | 'M5' | 'M15' | 'H1';
+  strategyType: StrategyType;
+  initialBalance: number;
+  stopLossATR: number;
+  takeProfitATR: number;
+  riskPercent: number;
+  tradeCount: number;
+  seed: number;
+  maxLots: number;
+}
+
+export interface SimulationSummary extends BacktestSummary {
+  pair: ForexPair;
+  timeframe: SimulationInput['timeframe'];
+  strategyType: StrategyType;
+  initialBalance: number;
+}
+
+export interface SimulationResult {
+  summary: SimulationSummary;
+  equityCurve: EquityPoint[];
+  recentTrades: TradeRecord[];
+  allTrades: TradeRecord[];
 }
 
 export interface LinuxDeploymentStep {

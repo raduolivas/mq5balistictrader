@@ -1,8 +1,69 @@
-import React, { useState, useEffect } from 'react';
-import { ForexPair, StrategyType, BacktestSummary, EquityPoint, TradeRecord } from '../types';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ForexPair, StrategyType, BacktestSummary, EquityPoint, TradeRecord } from '../types';
 import { FOREX_PAIRS } from '../data/forexData';
-import { Activity, Play, RefreshCw, TrendingUp, TrendingDown, DollarSign, ShieldAlert, Zap, Clock } from 'lucide-react';
+import { Activity, Play, TrendingDown, TrendingUp } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+
+const SIMULATION_SEED = 42;
+const AUTO_RUN_DELAY_MS = 250;
+
+interface SimulationRequest {
+  pair: ForexPair;
+  timeframe: 'M5';
+  strategyType: StrategyType;
+  initialBalance: number;
+  stopLossATR: number;
+  takeProfitATR: number;
+  riskPercent: number;
+  seed: number;
+}
+
+interface SimulationResponse {
+  summary: BacktestSummary;
+  equityCurve: EquityPoint[];
+  recentTrades: TradeRecord[];
+}
+
+const isFiniteNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isSimulationResponse = (value: unknown): value is SimulationResponse => {
+  if (!isRecord(value) || !isRecord(value.summary)) return false;
+  const summary = value.summary;
+  const numericSummaryFields = [
+    'initialBalance',
+    'finalBalance',
+    'totalReturnPct',
+    'winRatePct',
+    'profitFactor',
+    'maxDrawdownPct',
+    'totalTrades',
+    'sharpeRatio',
+  ];
+  if (!numericSummaryFields.every((field) => isFiniteNumber(summary[field]))) return false;
+  if (typeof summary.pair !== 'string' || typeof summary.timeframe !== 'string' ||
+      typeof summary.strategyType !== 'string') return false;
+  if (!Array.isArray(value.equityCurve) || !Array.isArray(value.recentTrades)) return false;
+
+  const validPoint = (point: unknown) => isRecord(point) &&
+    isFiniteNumber(point.step) && typeof point.time === 'string' &&
+    isFiniteNumber(point.equity) && isFiniteNumber(point.balance) &&
+    isFiniteNumber(point.drawdown) && isFiniteNumber(point.price);
+  const validTrade = (trade: unknown) => isRecord(trade) &&
+    isFiniteNumber(trade.id) && typeof trade.time === 'string' &&
+    (trade.type === 'BUY' || trade.type === 'SELL') && typeof trade.pair === 'string' &&
+    isFiniteNumber(trade.price) && isFiniteNumber(trade.lots) &&
+    isFiniteNumber(trade.pips) && isFiniteNumber(trade.profit) &&
+    (trade.outcome === 'WIN' || trade.outcome === 'LOSS');
+
+  return value.equityCurve.every(validPoint) && value.recentTrades.every(validTrade);
+};
+
+const isAbortError = (error: unknown) =>
+  error instanceof DOMException && error.name === 'AbortError';
 
 interface BacktestViewProps {
   selectedPair: ForexPair;
@@ -19,61 +80,109 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
   const [summary, setSummary] = useState<BacktestSummary | null>(null);
   const [equityCurve, setEquityCurve] = useState<EquityPoint[]>([]);
   const [recentTrades, setRecentTrades] = useState<TradeRecord[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+  const scheduledRequestRef = useRef<number | null>(null);
 
-  const runBacktest = async () => {
+  const simulationInput = useMemo<SimulationRequest>(() => ({
+    pair: selectedPair,
+    timeframe: 'M5',
+    strategyType,
+    initialBalance,
+    stopLossATR,
+    takeProfitATR,
+    riskPercent: 1,
+    seed: SIMULATION_SEED,
+  }), [initialBalance, selectedPair, stopLossATR, strategyType, takeProfitATR]);
+
+  const requestSimulation = useCallback(async (input: SimulationRequest) => {
+    activeRequestRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
     setLoading(true);
+    setError(null);
+
     try {
-      const response = await fetch('/api/run-backtest', {
+      const response = await fetch('/api/run-simulation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          pair: selectedPair,
-          timeframe: 'M5',
-          strategyType,
-          initialBalance,
-          stopLossATR,
-          takeProfitATR,
-          spreadPips: FOREX_PAIRS.find(p => p.symbol === selectedPair)?.typicalSpreadPips || 0.8
-        })
+        body: JSON.stringify(input),
+        signal: controller.signal,
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error('Simulation request failed');
+      }
+
+      const data: unknown = await response.json();
+      if (!isSimulationResponse(data)) {
+        throw new Error('Simulation response was invalid');
+      }
+      if (activeRequestRef.current !== controller) return;
+
       setSummary(data.summary);
       setEquityCurve(data.equityCurve);
       setRecentTrades(data.recentTrades);
-    } catch (err) {
-      console.error('Backtest error:', err);
+    } catch (requestError) {
+      if (!isAbortError(requestError) && activeRequestRef.current === controller) {
+        setError('The simulation could not be completed. Check the inputs and try again.');
+      }
     } finally {
-      setLoading(false);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        setLoading(false);
+      }
     }
-  };
+  }, []);
 
   useEffect(() => {
-    runBacktest();
-  }, [selectedPair, strategyType]);
+    scheduledRequestRef.current = window.setTimeout(() => {
+      scheduledRequestRef.current = null;
+      void requestSimulation(simulationInput);
+    }, AUTO_RUN_DELAY_MS);
+
+    return () => {
+      if (scheduledRequestRef.current !== null) {
+        window.clearTimeout(scheduledRequestRef.current);
+        scheduledRequestRef.current = null;
+      }
+      const activeRequest = activeRequestRef.current;
+      activeRequestRef.current = null;
+      activeRequest?.abort();
+    };
+  }, [requestSimulation, simulationInput]);
+
+  const runSimulationNow = () => {
+    if (scheduledRequestRef.current !== null) {
+      window.clearTimeout(scheduledRequestRef.current);
+      scheduledRequestRef.current = null;
+    }
+    void requestSimulation(simulationInput);
+  };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={loading}>
       {/* Controls Bar */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
         <div className="flex flex-wrap items-center justify-between gap-4 mb-4">
           <div>
             <h2 className="text-xl font-bold text-white flex items-center gap-2">
               <Activity className="w-5 h-5 text-emerald-400" />
-              Algorithmic Backtesting & Performance Simulator
+              Deterministic Monte Carlo Simulation
             </h2>
             <p className="text-xs text-slate-400 mt-0.5">
-              Simulate tick-level trading performance for both Approach A (In-Process ONNX) and Approach B (ZeroMQ Python Engine).
+              Explore reproducible, seeded strategy scenarios. This is not a historical market-data backtest or live execution.
             </p>
           </div>
 
           <button
-            onClick={runBacktest}
+            type="button"
+            onClick={runSimulationNow}
             disabled={loading}
             className="px-5 py-2.5 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 flex items-center gap-2 transition-all disabled:opacity-50"
           >
             <Play className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-            {loading ? 'Running Simulation...' : 'Re-Run Backtest'}
+            {loading ? 'Running Simulation...' : 'Run Simulation Again'}
           </button>
         </div>
 
@@ -140,14 +249,28 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
         </div>
       </div>
 
+      {error && (
+        <div
+          role="alert"
+          className="rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"
+        >
+          {error} The last successful result remains available below.
+        </div>
+      )}
+
       {/* Performance Summary Metrics */}
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
             <div className="text-xs text-slate-400 mb-1">Final Equity</div>
             <div className="text-lg font-bold text-emerald-400 font-mono">${summary.finalBalance.toLocaleString()}</div>
-            <div className="text-[11px] text-emerald-500 flex items-center gap-1 mt-1 font-semibold">
-              <TrendingUp className="w-3 h-3" /> +{summary.totalReturnPct}% Net
+            <div className={`text-[11px] flex items-center gap-1 mt-1 font-semibold ${
+              summary.totalReturnPct >= 0 ? 'text-emerald-500' : 'text-rose-400'
+            }`}>
+              {summary.totalReturnPct >= 0
+                ? <TrendingUp className="w-3 h-3" />
+                : <TrendingDown className="w-3 h-3" />}
+              {summary.totalReturnPct >= 0 ? '+' : ''}{summary.totalReturnPct}% Net
             </div>
           </div>
 
@@ -160,13 +283,21 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
             <div className="text-xs text-slate-400 mb-1">Profit Factor</div>
             <div className="text-lg font-bold text-white font-mono">{summary.profitFactor}</div>
-            <div className="text-[11px] text-emerald-400 mt-1">&gt; 1.5 Target Met</div>
+            <div className={`text-[11px] mt-1 ${
+              summary.profitFactor >= 1.5 ? 'text-emerald-400' : 'text-amber-400'
+            }`}>
+              {summary.profitFactor >= 1.5 ? '1.5 target met' : 'Below 1.5 target'}
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
             <div className="text-xs text-slate-400 mb-1">Max Drawdown</div>
             <div className="text-lg font-bold text-rose-400 font-mono">{summary.maxDrawdownPct}%</div>
-            <div className="text-[11px] text-slate-400 mt-1">Cap: 2.0% Safe</div>
+            <div className={`text-[11px] mt-1 ${
+              summary.maxDrawdownPct <= 2 ? 'text-emerald-400' : 'text-amber-400'
+            }`}>
+              {summary.maxDrawdownPct <= 2 ? 'Within 2.0% limit' : 'Above 2.0% limit'}
+            </div>
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
@@ -176,11 +307,9 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
           </div>
 
           <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
-            <div className="text-xs text-slate-400 mb-1">Avg Execution Latency</div>
-            <div className="text-lg font-bold text-amber-400 font-mono">{summary.avgLatencyMs} ms</div>
-            <div className="text-[11px] text-amber-500 flex items-center gap-1 mt-1 font-semibold">
-              <Zap className="w-3 h-3" /> Sub-15ms Target
-            </div>
+            <div className="text-xs text-slate-400 mb-1">Simulation Seed</div>
+            <div className="text-lg font-bold text-amber-400 font-mono">{SIMULATION_SEED}</div>
+            <div className="text-[11px] text-slate-400 mt-1">Reproducible scenario</div>
           </div>
         </div>
       )}
@@ -188,8 +317,10 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
       {/* Equity Curve Chart */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
         <h3 className="text-sm font-bold text-white mb-4 flex items-center justify-between">
-          <span>Simulated Equity & Drawdown Growth Curve</span>
-          <span className="text-xs font-mono text-slate-400">120 Historical Trades</span>
+          <span>Monte Carlo Equity & Drawdown Curve</span>
+          <span className="text-xs font-mono text-slate-400">
+            {summary?.totalTrades ?? 120} Seeded Trades · Seed {SIMULATION_SEED}
+          </span>
         </h3>
 
         <div className="h-72 w-full">
@@ -216,7 +347,7 @@ export const BacktestView: React.FC<BacktestViewProps> = ({ selectedPair, setSel
 
       {/* Recent Trades Table */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 overflow-hidden">
-        <h3 className="text-sm font-bold text-white mb-4">Live Simulated Execution Log</h3>
+        <h3 className="text-sm font-bold text-white mb-4">Seeded Simulation Trade Log</h3>
 
         <div className="overflow-x-auto">
           <table className="w-full text-left font-mono text-xs text-slate-300">

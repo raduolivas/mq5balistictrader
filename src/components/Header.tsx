@@ -1,15 +1,23 @@
 import React from 'react';
-import { ForexPair } from '../types';
+import type { ForexPair } from '../types';
 import { FOREX_PAIRS } from '../data/forexData';
-import { Activity, Terminal, ShieldCheck, Layers, Cpu, Zap, Server, Sliders, Globe } from 'lucide-react';
+import { Activity, Terminal, ShieldCheck, Layers, Cpu, Zap, Server, Globe } from 'lucide-react';
+
+const NAV_TABS = [
+  { id: 'architecture', label: 'Architecture & IPC', icon: Layers },
+  { id: 'code', label: 'MQL5 & Python Scripts', icon: Terminal },
+  { id: 'backtest', label: 'Monte Carlo Simulator', icon: Activity },
+  { id: 'ml-studio', label: 'ML Feature Studio', icon: Zap },
+  { id: 'risk', label: 'Risk & Circuit Breakers', icon: ShieldCheck },
+  { id: 'ubuntu', label: 'Ubuntu Linux VPS Guide', icon: Server },
+  { id: 'ai-review', label: 'AI Systems Advisor', icon: Cpu },
+] as const;
 
 interface HeaderProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   selectedPair: ForexPair;
   setSelectedPair: (pair: ForexPair) => void;
-  isSimulating: boolean;
-  setIsSimulating: (sim: boolean) => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -17,19 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   setActiveTab,
   selectedPair,
   setSelectedPair,
-  isSimulating,
-  setIsSimulating,
 }) => {
-  const navTabs = [
-    { id: 'architecture', label: 'Architecture & IPC', icon: Layers },
-    { id: 'code', label: 'MQL5 & Python Scripts', icon: Terminal },
-    { id: 'backtest', label: 'Quant Backtester', icon: Activity },
-    { id: 'ml-studio', label: 'ML Feature Studio', icon: Zap },
-    { id: 'risk', label: 'Risk & Circuit Breakers', icon: ShieldCheck },
-    { id: 'ubuntu', label: 'Ubuntu Linux VPS Guide', icon: Server },
-    { id: 'ai-review', label: 'AI Systems Advisor', icon: Cpu },
-  ];
-
   return (
     <header className="border-b border-slate-800 bg-slate-950/90 backdrop-blur sticky top-0 z-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -49,7 +45,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Low-Latency In-Process ONNX + Hybrid ZeroMQ IPC Trading Architecture
+                In-Process ONNX + Hybrid ZeroMQ IPC Reference Architecture
               </p>
             </div>
           </div>
@@ -71,17 +67,16 @@ export const Header: React.FC<HeaderProps> = ({
               </select>
             </div>
 
-            {/* Live Indicator */}
+            {/* Environment Status */}
             <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span className="text-[11px] text-slate-300 font-mono">Wine 9.0+ & ZeroMQ Ready</span>
+              <span className="text-[11px] text-slate-300 font-mono">Architecture preview · Demo-safe</span>
             </div>
           </div>
         </div>
 
         {/* Navigation Tabs */}
         <div className="flex space-x-1 overflow-x-auto py-2 scrollbar-none">
-          {navTabs.map((tab) => {
+          {NAV_TABS.map((tab) => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (

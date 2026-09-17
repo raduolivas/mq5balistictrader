@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { CODE_TEMPLATES, CodeFileTemplate } from '../data/codeTemplates';
-import { Copy, Check, Download, FileCode, Terminal, Layers, RefreshCw } from 'lucide-react';
+import { Copy, Check, Download, FileCode, Terminal } from 'lucide-react';
 
 export const CodeGeneratorView: React.FC = () => {
   const [selectedFileIndex, setSelectedFileIndex] = useState<number>(0);
@@ -53,7 +53,7 @@ export const CodeGeneratorView: React.FC = () => {
             MetaTrader 5 & Python AI Source Code Explorer
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Production-ready scripts for both Approach A (Pure Native MQL5 + ONNX) and Approach B (Hybrid MQL5 EA + Python ZeroMQ IPC Engine).
+            Exact snapshots of the repository sources. Experimental files are identified explicitly and must not be deployed as complete integrations.
           </p>
         </div>
 
@@ -112,8 +112,17 @@ export const CodeGeneratorView: React.FC = () => {
                 <span className="px-2 py-0.5 text-xs bg-slate-800 text-slate-300 rounded border border-slate-700">
                   {currentTemplate.category}
                 </span>
+                <span className={`px-2 py-0.5 text-xs rounded border ${
+                  currentTemplate.status === 'experimental'
+                    ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                    : 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
+                }`}>
+                  {currentTemplate.status === 'experimental' ? 'Experimental' : 'Repository source'}
+                </span>
               </div>
-              <p className="text-xs text-slate-400 mt-1">{currentTemplate.description}</p>
+              <p className="text-xs text-slate-400 mt-1">
+                {currentTemplate.description} · {currentTemplate.sourcePath}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">

@@ -1,0 +1,9 @@
+**
+!python/
+python/**
+!python/requirements-runtime.txt
+!python/bridge_protocol.py
+!python/forex_ai_engine.py
+!python/healthcheck.py
+!python/mt5_tcp_bridge.py
+

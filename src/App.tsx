@@ -1,18 +1,32 @@
-import React, { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { Header } from './components/Header';
-import { ArchitectureView } from './components/ArchitectureView';
-import { CodeGeneratorView } from './components/CodeGeneratorView';
-import { BacktestView } from './components/BacktestView';
-import { MlStudioView } from './components/MlStudioView';
-import { RiskEngineView } from './components/RiskEngineView';
-import { UbuntuGuideView } from './components/UbuntuGuideView';
-import { AiReviewView } from './components/AiReviewView';
-import { ForexPair } from './types';
+import type { ForexPair } from './types';
+
+const ArchitectureView = lazy(() =>
+  import('./components/ArchitectureView').then((module) => ({ default: module.ArchitectureView })),
+);
+const CodeGeneratorView = lazy(() =>
+  import('./components/CodeGeneratorView').then((module) => ({ default: module.CodeGeneratorView })),
+);
+const BacktestView = lazy(() =>
+  import('./components/BacktestView').then((module) => ({ default: module.BacktestView })),
+);
+const MlStudioView = lazy(() =>
+  import('./components/MlStudioView').then((module) => ({ default: module.MlStudioView })),
+);
+const RiskEngineView = lazy(() =>
+  import('./components/RiskEngineView').then((module) => ({ default: module.RiskEngineView })),
+);
+const UbuntuGuideView = lazy(() =>
+  import('./components/UbuntuGuideView').then((module) => ({ default: module.UbuntuGuideView })),
+);
+const AiReviewView = lazy(() =>
+  import('./components/AiReviewView').then((module) => ({ default: module.AiReviewView })),
+);
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<string>('architecture');
   const [selectedPair, setSelectedPair] = useState<ForexPair>('EUR/USD');
-  const [isSimulating, setIsSimulating] = useState<boolean>(true);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans antialiased selection:bg-emerald-500 selection:text-slate-950">
@@ -22,51 +36,47 @@ export default function App() {
         setActiveTab={setActiveTab}
         selectedPair={selectedPair}
         setSelectedPair={setSelectedPair}
-        isSimulating={isSimulating}
-        setIsSimulating={setIsSimulating}
       />
 
       {/* Main Content Stage */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {activeTab === 'architecture' && (
-          <ArchitectureView onSelectTab={(tab) => setActiveTab(tab)} />
-        )}
+        <Suspense
+          fallback={(
+            <div className="rounded-xl border border-slate-800 bg-slate-900 p-4 text-xs text-slate-400" role="status">
+              Loading workspace…
+            </div>
+          )}
+        >
+          {activeTab === 'architecture' && (
+            <ArchitectureView onSelectTab={(tab) => setActiveTab(tab)} />
+          )}
 
-        {activeTab === 'code' && (
-          <CodeGeneratorView />
-        )}
+          {activeTab === 'code' && <CodeGeneratorView />}
 
-        {activeTab === 'backtest' && (
-          <BacktestView selectedPair={selectedPair} setSelectedPair={setSelectedPair} />
-        )}
+          {activeTab === 'backtest' && (
+            <BacktestView selectedPair={selectedPair} setSelectedPair={setSelectedPair} />
+          )}
 
-        {activeTab === 'ml-studio' && (
-          <MlStudioView />
-        )}
+          {activeTab === 'ml-studio' && <MlStudioView />}
 
-        {activeTab === 'risk' && (
-          <RiskEngineView />
-        )}
+          {activeTab === 'risk' && <RiskEngineView />}
 
-        {activeTab === 'ubuntu' && (
-          <UbuntuGuideView />
-        )}
+          {activeTab === 'ubuntu' && <UbuntuGuideView />}
 
-        {activeTab === 'ai-review' && (
-          <AiReviewView selectedPair={selectedPair} />
-        )}
+          {activeTab === 'ai-review' && <AiReviewView selectedPair={selectedPair} />}
+        </Suspense>
       </main>
 
       {/* Footer */}
       <footer className="border-t border-slate-900 bg-slate-950 py-6 mt-12 text-center text-xs text-slate-500 font-mono">
         <div className="max-w-7xl mx-auto px-4 flex flex-wrap items-center justify-between gap-4">
           <div>
-            MetaTrader 5 Forex AI Trading Studio &bull; MQL5 & PyZMQ Hybrid Architecture
+            MetaTrader 5 Forex AI Studio &bull; Simulation and Reference Architecture
           </div>
           <div className="flex items-center gap-4 text-slate-400">
-            <span>Wine 9.0+ Headless</span>
-            <span>ZeroMQ IPC :5555/:5556</span>
-            <span>Equinix LD4 / NY4</span>
+            <span>Deterministic Monte Carlo</span>
+            <span>Demo-safe</span>
+            <span>Validate on target VPS</span>
           </div>
         </div>
       </footer>

@@ -1,7 +1,14 @@
-import React, { useState } from 'react';
-import { ForexPair } from '../types';
-import { Cpu, Send, Bot, User, Sparkles, RefreshCw, Terminal, CheckCircle2 } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import type { ForexPair } from '../types';
+import { Cpu, Bot, Sparkles, RefreshCw } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
+
+interface AiReviewResponse {
+  advice: string;
+}
+
+const isAbortError = (error: unknown) =>
+  error instanceof DOMException && error.name === 'AbortError';
 
 interface AiReviewViewProps {
   selectedPair: ForexPair;
@@ -14,9 +21,26 @@ export const AiReviewView: React.FC<AiReviewViewProps> = ({ selectedPair }) => {
   );
   const [loading, setLoading] = useState<boolean>(false);
   const [aiAdvice, setAiAdvice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const activeRequestRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setLoading(false);
+
+    return () => {
+      const activeRequest = activeRequestRef.current;
+      activeRequestRef.current = null;
+      activeRequest?.abort();
+    };
+  }, [selectedPair]);
 
   const handleConsultAi = async () => {
+    activeRequestRef.current?.abort();
+    const controller = new AbortController();
+    activeRequestRef.current = controller;
     setLoading(true);
+    setError(null);
+
     try {
       const response = await fetch('/api/ai-strategy-review', {
         method: 'POST',
@@ -27,20 +51,35 @@ export const AiReviewView: React.FC<AiReviewViewProps> = ({ selectedPair }) => {
           features: ['Order Flow Imbalance (OFI)', 'Spread Z-Score', 'ATR Ratio', 'VWAP Deviation'],
           riskParams: { maxDailyDrawdown: 2.0, stopLossATR: 1.5, maxLotSize: 1.0 },
           question
-        })
+        }),
+        signal: controller.signal,
       });
 
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error('AI review request failed');
+      }
+
+      const data = await response.json() as AiReviewResponse;
+      if (typeof data.advice !== 'string') {
+        throw new Error('AI review response was invalid');
+      }
+      if (activeRequestRef.current !== controller) return;
+
       setAiAdvice(data.advice);
-    } catch (err) {
-      console.error('AI Review Error:', err);
+    } catch (requestError) {
+      if (!isAbortError(requestError) && activeRequestRef.current === controller) {
+        setError('The AI systems review is temporarily unavailable. Please try again.');
+      }
     } finally {
-      setLoading(false);
+      if (activeRequestRef.current === controller) {
+        activeRequestRef.current = null;
+        setLoading(false);
+      }
     }
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" aria-busy={loading}>
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6">
         <h2 className="text-xl font-bold text-white flex items-center gap-2">
           <Cpu className="w-5 h-5 text-emerald-400" />
@@ -85,6 +124,7 @@ export const AiReviewView: React.FC<AiReviewViewProps> = ({ selectedPair }) => {
           </div>
 
           <button
+            type="button"
             onClick={handleConsultAi}
             disabled={loading}
             className="w-full py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs rounded-xl shadow-lg shadow-emerald-500/20 flex items-center justify-center gap-2 transition-all disabled:opacity-50"
@@ -106,6 +146,15 @@ export const AiReviewView: React.FC<AiReviewViewProps> = ({ selectedPair }) => {
           <h3 className="text-base font-bold text-white mb-4 flex items-center gap-2">
             <Bot className="w-5 h-5 text-emerald-400" /> AI Systems Engineer Recommendation
           </h3>
+
+          {error && (
+            <div
+              role="alert"
+              className="mb-4 rounded-xl border border-rose-500/30 bg-rose-500/10 px-4 py-3 text-sm text-rose-200"
+            >
+              {error} Any previous recommendation remains available below.
+            </div>
+          )}
 
           <div className="flex-1 bg-slate-950 rounded-xl border border-slate-800 p-6 overflow-y-auto max-h-[500px] text-xs text-slate-200 leading-relaxed font-sans">
             {aiAdvice ? (
